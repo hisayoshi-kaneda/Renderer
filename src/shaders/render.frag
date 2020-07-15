@@ -1,12 +1,12 @@
-#version 330
+#version 410
 #extension GL_ARB_gpu_shader_fp64 : enable
 #define EPS 1e-6
 #define INF 1e10
 #define DIFFUSE 0
 #define SPECULAR 1
 #define REFRACTION 2
-#define DEPTH_MAX 60
-#define DEPTH_MIN 20
+#define DEPTH_MAX 100
+#define DEPTH_MIN 30
 precision highp float;
 const float PI = acos(-1.0);
 const uint UINT_MAX = 4294967295U;
@@ -67,6 +67,21 @@ float rand01(){
 	return float(rand()) / float(UINT_MAX);
 }
 
+#define HASHSCALE3 vec3(.1031, .1030, .0973)
+vec2 hash23(vec3 p3)
+{
+	p3 = fract(p3 * HASHSCALE3);
+	p3 += dot(p3, p3.yzx+19.19);
+	return fract((p3.xx+p3.yz)*p3.zy);
+}
+
+vec3 hash33(vec3 p3)
+{
+	p3 = fract(p3 * HASHSCALE3);
+	p3 += dot(p3, p3.yxz+19.19);
+	return fract((p3.xxy + p3.yxx)*p3.zyx);
+
+}
 
 vec3 gammaCorrection(vec3 color){
 	return pow(color, vec3(1.0/gamma));
@@ -95,7 +110,7 @@ bool intersectSphere2(Ray r, Sphere s, inout Hitpoint hp){
 //		t1 = t2;
 //		t2 = tmp;
 //	}
-	//t1 = float(-b - sD), t2 = float(-b + sD);
+	t1 = float(-b - sD), t2 = float(-b + sD);
 	if(t1 < EPS && t2 < EPS) return false;
 	if(t1 > EPS){
 		hp.dist = float(t1);
@@ -119,7 +134,7 @@ bool intersectSphere(Ray r, Sphere s, inout Hitpoint hp){
 	}
 	float x = (-b + sqrt(D)) / (2.0 * a);
 	float y = (-b - sqrt(D)) / (2.0 * a);
-	//if(x < EPS && y < EPS) return false;
+	if(x < EPS && y < EPS) return false;
 	if(y > EPS){
 		hp.pos = r.org + y * r.dir;
 		hp.normal = normalize(hp.pos - s.center);
@@ -157,22 +172,6 @@ bool intersectScene(Ray r, Scene scene, inout Hitpoint hp){
 }
 
 
-
-#define HASHSCALE3 vec3(.1031, .1030, .0973)
-vec2 hash23(vec3 p3)
-{
-	p3 = fract(p3 * HASHSCALE3);
-	p3 += dot(p3, p3.yzx+19.19);
-	return fract((p3.xx+p3.yz)*p3.zy);
-}
-
-vec3 hash33(vec3 p3)
-{
-	p3 = fract(p3 * HASHSCALE3);
-	p3 += dot(p3, p3.yxz+19.19);
-	return fract((p3.xxy + p3.yxx)*p3.zyx);
-
-}
 
 
 vec3 radiance(Ray ray, Scene scene){
@@ -215,7 +214,7 @@ vec3 radiance(Ray ray, Scene scene){
 			case DIFFUSE: {
 				vec3 w, u, v;
 				w = orientingNormal;
-				if(abs(w.x) > 0.0) u = normalize(cross(vec3(0.0, 1.0, 0.0), w));
+				if(abs(w.x) > 0.1) u = normalize(cross(vec3(0.0, 1.0, 0.0), w));
 				else u = normalize(cross(vec3(1.0, 0.0, 0.0), w));
 				v = normalize(cross(w, u));
 				float r1 = 2.0 * PI * Xi.x; //rand01();
@@ -224,13 +223,14 @@ vec3 radiance(Ray ray, Scene scene){
 				//r2 = rand01();
 				float r2s = sqrt(r2);
 				vec3 dir = normalize(u * cos(r1) * r2s + v * sin(r1) * r2s + w * sqrt(1.0 - r2));
-				nowRay = Ray(hp.pos, dir);
+				nowRay = Ray(hp.pos + dir * EPS * 10.0, dir);
 				accumulatedReflectance *= obj.color / rrp;
 				continue;
 			}break;
 
 			case SPECULAR:{
-				nowRay = Ray(hp.pos, nowRay.dir - hp.normal * 2.0 * dot(hp.normal, nowRay.dir));
+				vec3 dir =  nowRay.dir - hp.normal * 2.0 * dot(hp.normal, nowRay.dir);
+				nowRay = Ray(hp.pos + dir * EPS * 10.0, dir);
 				accumulatedReflectance = accumulatedReflectance * obj.color / rrp;
 				continue;
 			}break;
@@ -274,20 +274,20 @@ void main(){
 	//vec3 pixPos = vec3((gl_FragCoord.xy - resolution / 2.0) * pixSize, 0.0) + screenCenter;
 	vec3 pixPos = screenX * (gl_FragCoord.x / resolution.x - 0.5) * screenWidth + screenY * (gl_FragCoord.y / resolution.y - 0.5) * screenHeight + screenCenter;
 	vec3 sumRadiance = vec3(0.0);
-	for(int sx = 1; sx <= 4; sx++){
-		for(int sy = 1; sy <= 4; sy++){
-			vec3 spixPos = pixPos + pixSize / 4.0 * (screenX + screenY);
-			Ray ray = Ray(cameraPosition, normalize(spixPos - cameraPosition));
-			sumRadiance += radiance(ray, scene) / float(numSamples * 4 * 4);
-		}
-	}
-//	int n = 1;
-//	for(int i=0;i < n;i++){
-//		vec3 pos = pixPos + pixSize / 2.0 * vec3(1.0, 1.0, 0.0);
-//		Ray ray = Ray(cameraPosition, normalize(pos - cameraPosition));
-//		sumRadiance += radiance(ray, scene) / float(numSamples);
-//		//sumRadiance = max(sumRadiance, radiance(ray, scene));
+//	for(int sx = 1; sx <= 4; sx++){
+//		for(int sy = 1; sy <= 4; sy++){
+//			vec3 spixPos = pixPos + pixSize / 4.0 * (screenX + screenY);
+//			Ray ray = Ray(cameraPosition, normalize(spixPos - cameraPosition));
+//			sumRadiance += radiance(ray, scene) / float(numSamples * 4 * 4);
+//		}
 //	}
+	int n = 1;
+	for(int i=0;i < n;i++){
+		vec3 pos = pixPos + pixSize / 2.0 * (screenX + screenY);
+		Ray ray = Ray(cameraPosition, normalize(pos - cameraPosition));
+		sumRadiance += radiance(ray, scene) / float(numSamples);
+		//sumRadiance = max(sumRadiance, radiance(ray, scene));
+	}
 	out_color = vec4(sumRadiance, 1.0);
 	return;
 	out_color = vec4(gammaCorrection(clamp(sumRadiance, 0.0, 1.0)), 1.0);

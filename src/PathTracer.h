@@ -55,7 +55,7 @@ public:
 
 	void render() {
 		int frame = 0;
-		int numSamples = 500;
+		int numSamples = 1000;
 		while (*window) {
 			frame++;
 			cout << frame << endl;

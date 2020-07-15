@@ -1,4 +1,4 @@
-#version 330
+#version 410
 
 vec3 positions[] = vec3[](
 	vec3(-1.0, -1.0, 0.0),
